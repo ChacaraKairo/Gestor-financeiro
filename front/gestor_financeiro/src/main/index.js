@@ -1,40 +1,73 @@
-import { app, shell, BrowserWindow, ipcMain } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, dialog } from 'electron'
 import { join } from 'path'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
 
-// 1. Imports para rodar o Backend
 const { spawn } = require('child_process')
 const path = require('path')
+const fs = require('fs')
 
 let apiProcess = null
 
-// 2. Função para iniciar o Backend
 function startBackend() {
-  // Se estiver em Desenvolvimento (npm run dev), NÃO roda o exe (você roda manual)
   if (!app.isPackaged) {
-    console.log('Modo DEV: Inicie o backend manualmente no terminal.')
+    console.log('Modo DEV: Backend deve ser iniciado manualmente.')
     return
   }
 
-  // Se estiver em Produção (Instalado), roda o exe da pasta resources
-  const scriptPath = path.join(process.resourcesPath, 'api.exe')
-  console.log(`Iniciando Backend em: ${scriptPath}`)
+  // Define onde procurar o api.exe (Prioridade para a pasta resources raiz)
+  const resourcesFolder = process.resourcesPath
+  const possiblePaths = [
+    path.join(resourcesFolder, 'api.exe'),
+    path.join(resourcesFolder, 'app.asar.unpacked', 'resources', 'api.exe'), // Às vezes o builder joga aqui
+    path.join(resourcesFolder, 'resources', 'api.exe')
+  ]
 
-  apiProcess = spawn(scriptPath)
+  let scriptPath = null
+  for (const p of possiblePaths) {
+    if (fs.existsSync(p)) {
+      scriptPath = p
+      break
+    }
+  }
 
-  apiProcess.stdout.on('data', (data) => {
-    console.log(`Backend: ${data}`)
-  })
+  if (!scriptPath) {
+    dialog.showErrorBox('Erro Fatal', `O arquivo api.exe não foi encontrado.\nProcurado em:\n${possiblePaths.join('\n')}`)
+    return
+  }
 
-  apiProcess.stderr.on('data', (data) => {
-    console.error(`Backend Erro: ${data}`)
-  })
+  // --- O SEGREDO ESTÁ AQUI ---
+  // Dizemos para o spawn rodar COM BASE na pasta do executável
+  const options = {
+    cwd: path.dirname(scriptPath), // <--- Força a pasta correta
+    windowsHide: true // Oculta a janela preta (mude para false se quiser ver para debug)
+  }
+
+  // Tenta iniciar
+  try {
+    apiProcess = spawn(scriptPath, [], options)
+
+    // Captura erros de inicialização (ex: permissão, arquivo corrompido)
+    apiProcess.on('error', (err) => {
+      dialog.showErrorBox('Erro ao Iniciar Backend', `Detalhe: ${err.message}`)
+    })
+
+    // Captura se o Backend fechar sozinho de repente
+    apiProcess.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        // Opcional: Avisar se fechar com erro, mas cuidado para não spamar
+        console.log(`Backend fechou com código: ${code}`)
+      }
+    })
+
+  } catch (e) {
+    dialog.showErrorBox('Exceção', `Erro ao tentar executar spawn: ${e}`)
+  }
 }
 
 function createWindow() {
   const mainWindow = new BrowserWindow({
-    width: 1200, // Aumentei um pouco para caber os gráficos
+    width: 1200,
     height: 800,
     show: false,
     autoHideMenuBar: true,
@@ -62,8 +95,7 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
-  // 3. Inicia o Backend assim que o App abrir
-  startBackend()
+  startBackend() // Inicia o Python
 
   electronApp.setAppUserModelId('com.electron')
 
@@ -80,7 +112,6 @@ app.whenReady().then(() => {
   })
 })
 
-// 4. Mata o Backend quando fechar a janela
 app.on('before-quit', () => {
   if (apiProcess) {
     apiProcess.kill()
