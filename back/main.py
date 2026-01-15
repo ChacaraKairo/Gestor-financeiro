@@ -1,9 +1,12 @@
 from fastapi import FastAPI, Depends, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse # <--- Importante para download
 from sqlalchemy.orm import Session
 from typing import List
 from datetime import date
 import calendar
+import csv  # <--- Para gerar a planilha
+import io   # <--- Para criar o arquivo na memória
 from sqlalchemy import func
 
 import models, schemas, database
@@ -119,14 +122,8 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
     if not db_transaction:
         raise HTTPException(status_code=404, detail="Transação não encontrada")
     
-    # Atualiza os campos
-    db_transaction.description = transaction.description
-    db_transaction.amount = transaction.amount
-    db_transaction.transaction_date = transaction.transaction_date
-    db_transaction.category_id = transaction.category_id
-    db_transaction.is_fixed = transaction.is_fixed
-    db_transaction.is_paid = transaction.is_paid
-    db_transaction.payment_method = transaction.payment_method
+    for key, value in transaction.model_dump().items():
+        setattr(db_transaction, key, value)
     
     db.commit()
     db.refresh(db_transaction)
@@ -175,6 +172,44 @@ def generate_fixed_expenses(month: int, year: int, db: Session = Depends(get_db)
     db.commit()
     return {"message": f"{count} despesas fixas geradas para {month}/{year}"}
 
+# --- NOVO: EXPORTAR PARA EXCEL (CSV) ---
+@app.get("/transactions/export")
+def export_transactions(db: Session = Depends(get_db)):
+    # 1. Busca TUDO do banco
+    transactions = db.query(models.Transaction).all()
+    
+    # 2. Prepara o arquivo CSV na memória
+    output = io.StringIO()
+    writer = csv.writer(output, delimiter=';') # Ponto e vírgula para Excel no Brasil abrir direto
+    
+    # Cabeçalho
+    writer.writerow(["ID", "Data", "Descrição", "Valor", "Categoria", "Tipo", "Status", "Fixo?"])
+    
+    # Linhas
+    for t in transactions:
+        writer.writerow([
+            t.id,
+            t.transaction_date.strftime("%d/%m/%Y"),
+            t.description,
+            str(t.amount).replace('.', ','), # Formato BR
+            t.category.name if t.category else "Sem Categoria",
+            t.category.type if t.category else "",
+            "Pago" if t.is_paid else "Pendente",
+            "Sim" if t.is_fixed else "Não"
+        ])
+        
+    output.seek(0)
+    
+    # 3. Envia como arquivo para download
+    # Adicionamos BOM (\ufeff) para o Excel reconhecer acentos
+    content = '\ufeff' + output.getvalue()
+    
+    return StreamingResponse(
+        iter([content]),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=relatorio_financeiro.csv"}
+    )
+
 # ==========================================
 # DASHBOARD
 # ==========================================
@@ -210,18 +245,14 @@ def get_dashboard_summary(month: int, year: int, db: Session = Depends(get_db)):
         "pendente": pendente
     }
 
-# --- NOVO: HISTÓRICO ANUAL (PARA GRÁFICO DE BARRAS) ---
 @app.get("/dashboard/history")
 def get_dashboard_history(year: int, db: Session = Depends(get_db)):
-    # Retorna uma lista com Receita/Despesa para cada mês do ano (1 a 12)
     history = []
-    
     for month in range(1, 13):
         last_day = calendar.monthrange(year, month)[1]
         start_date = date(year, month, 1)
         end_date = date(year, month, last_day)
         
-        # Função auxiliar interna para somar
         def get_sum(tipo):
             val = db.query(func.sum(models.Transaction.amount))\
                 .join(models.Category)\
@@ -236,5 +267,4 @@ def get_dashboard_history(year: int, db: Session = Depends(get_db)):
             "receita": get_sum("RECEITA"),
             "despesa": get_sum("DESPESA")
         })
-
     return history
