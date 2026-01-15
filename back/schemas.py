@@ -1,0 +1,41 @@
+from pydantic import BaseModel
+from typing import Optional, List
+from datetime import date
+from enum import Enum
+
+# Validação para Categorias
+class TransactionType(str, Enum):
+    RECEITA = "RECEITA"
+    DESPESA = "DESPESA"
+
+class CategoryBase(BaseModel):
+    name: str
+    color_hex: Optional[str] = "#CCCCCC"
+    type: TransactionType
+
+class CategoryCreate(CategoryBase):
+    pass
+
+class CategoryResponse(CategoryBase):
+    id: int
+    class Config:
+        from_attributes = True # Permite ler dados do SQLAlchemy
+
+# Validação para Transações
+class TransactionBase(BaseModel):
+    description: str
+    amount: float
+    transaction_date: date
+    category_id: int
+    is_fixed: bool = False
+    is_paid: bool = False
+    payment_method: Optional[str] = None
+
+class TransactionCreate(TransactionBase):
+    pass
+
+class TransactionResponse(TransactionBase):
+    id: int
+    category: Optional[CategoryResponse] = None # Retorna a categoria junto
+    class Config:
+        from_attributes = True
