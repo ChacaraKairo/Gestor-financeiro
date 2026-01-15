@@ -10,6 +10,15 @@ files:
   - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
 asarUnpack:
   - resources/**
+
+# --- ADIÇÃO CRÍTICA PARA O BACKEND ---
+# Isso copia o executável Python e o arquivo .env para a pasta de instalação
+extraResources:
+  - from: resources/api.exe
+    to: api.exe
+  - from: resources/.env
+    to: .env
+
 win:
   executableName: gestor_financeiro
 nsis:

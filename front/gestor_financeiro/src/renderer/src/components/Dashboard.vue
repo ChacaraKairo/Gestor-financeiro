@@ -226,7 +226,11 @@ async function exportarRelatorio() {
   }
 }
 
-const money = (val) => Number(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+// Função money CORRIGIDA e mais segura
+const money = (val) => {
+  if (val === undefined || val === null || val === '') return 'R$ 0,00'
+  return Number(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
+}
 const formatDate = (dateString) =>
   new Date(dateString).toLocaleDateString('pt-BR', { timeZone: 'UTC' })
 
@@ -327,13 +331,23 @@ watch(filtros, () => buscarDados(), { deep: true })
       <div class="modal-content large-modal">
         <h3>Contas Fixas</h3>
         <div class="add-cat-box">
-          <input v-model="novaRecorrencia.description" placeholder="Aluguel" /><input
+          <input
+            v-model="novaRecorrencia.description"
+            type="text"
+            placeholder="Descrição (Ex: Aluguel)"
+            class="input-desc"
+          />
+          <input
             v-model="novaRecorrencia.estimated_amount"
             type="number"
-            placeholder="Valor"
-          /><select v-model="novaRecorrencia.category_id">
-            <option v-for="c in categorias" :value="c.id">{{ c.name }}</option></select
-          ><button @click="criarRecorrencia" class="btn-mini-add">+</button>
+            placeholder="Valor (R$)"
+            class="input-valor"
+          />
+          <select v-model="novaRecorrencia.category_id" class="input-cat">
+            <option value="" disabled>Categoria</option>
+            <option v-for="cat in categorias" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+          <button @click="criarRecorrencia" class="btn-mini-add">+</button>
         </div>
         <div class="cat-list">
           <div v-for="r in recorrencias" :key="r.id" class="cat-item">
@@ -556,5 +570,41 @@ button,
   -webkit-app-region: no-drag !important;
   user-select: text !important;
   cursor: auto !important;
+}
+
+/* Adicione isso no final do seu CSS */
+.add-cat-box {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+
+/* Descrição ocupa o espaço que sobrar */
+.input-desc {
+  flex: 2;
+  min-width: 0;
+}
+
+/* Valor tem tamanho fixo, mas suficiente */
+.input-valor {
+  flex: 0 0 110px; /* Largura fixa de 110px, não encolhe nem estica */
+  min-width: 110px;
+}
+
+/* Categoria ocupa espaço normal */
+.input-cat {
+  flex: 1;
+  min-width: 0;
+}
+
+/* Garante que o badge (etiqueta cinza) apareça bonito */
+.badge-value {
+  background-color: #eee;
+  padding: 4px 8px;
+  border-radius: 12px;
+  font-size: 0.85em;
+  font-weight: bold;
+  color: #555;
+  white-space: nowrap;
 }
 </style>
