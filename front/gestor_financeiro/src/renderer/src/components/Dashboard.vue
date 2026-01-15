@@ -1,13 +1,24 @@
 <script setup>
 import { ref, onMounted, watch, computed } from 'vue'
 import api from '../services/api'
-import { Chart as ChartJS, ArcElement, Tooltip, Legend } from 'chart.js'
-import { Pie } from 'vue-chartjs'
+// 1. IMPORTAÇÃO DOS NOVOS COMPONENTES DO GRÁFICO DE BARRAS
+import {
+  Chart as ChartJS,
+  ArcElement,
+  Tooltip,
+  Legend,
+  BarElement,
+  CategoryScale,
+  LinearScale
+} from 'chart.js'
+import { Pie, Bar } from 'vue-chartjs'
 
-ChartJS.register(ArcElement, Tooltip, Legend)
+// 2. REGISTRO DOS COMPONENTES
+ChartJS.register(ArcElement, Tooltip, Legend, BarElement, CategoryScale, LinearScale)
 
 // --- ESTADOS ---
 const resumo = ref({ receita: 0, despesa: 0, saldo: 0, pendente: 0 })
+const historico = ref([]) // NOVO: Estado para o gráfico de barras
 const transacoes = ref([])
 const categorias = ref([])
 const recorrencias = ref([])
@@ -63,8 +74,10 @@ const meses = [
   { v: 12, n: 'Dezembro' }
 ]
 
-// --- GRÁFICO ---
-const chartData = computed(() => {
+// --- GRÁFICOS ---
+
+// A. Gráfico de Pizza (Existente - Despesas por Categoria)
+const pieData = computed(() => {
   const despesas = transacoes.value.filter((t) => t.category && t.category.type === 'DESPESA')
   const agrupado = {}
   const cores = []
@@ -83,22 +96,47 @@ const chartData = computed(() => {
     datasets: [{ backgroundColor: cores, data: Object.values(agrupado) }]
   }
 })
-const chartOptions = { responsive: true, maintainAspectRatio: false }
+
+// B. Gráfico de Barras (NOVO - Evolução Anual)
+const barData = computed(() => {
+  return {
+    labels: meses.map((m) => m.n.substr(0, 3)), // Jan, Fev, Mar...
+    datasets: [
+      {
+        label: 'Receitas',
+        backgroundColor: '#2ecc71',
+        data: historico.value.map((h) => h.receita)
+      },
+      {
+        label: 'Despesas',
+        backgroundColor: '#e74c3c',
+        data: historico.value.map((h) => h.despesa)
+      }
+    ]
+  }
+})
+
+const pieOptions = { responsive: true, maintainAspectRatio: false }
+const barOptions = { responsive: true, maintainAspectRatio: false } // Opções para o gráfico de barras
 
 // --- FUNÇÕES ---
 async function buscarDados() {
   carregando.value = true
   try {
     const params = { month: filtros.value.mes, year: filtros.value.ano }
-    const [resResumo, resTrans, resCats] = await Promise.all([
+
+    // 3. ALTERADO: Adicionada a busca do histórico (/dashboard/history)
+    const [resResumo, resTrans, resCats, resHist] = await Promise.all([
       api.get('/dashboard/summary', { params }),
       api.get('/transactions/', { params }),
-      api.get('/categories/')
+      api.get('/categories/'),
+      api.get('/dashboard/history', { params: { year: filtros.value.ano } })
     ])
 
     resumo.value = resResumo.data
     transacoes.value = resTrans.data
     categorias.value = resCats.data
+    historico.value = resHist.data // Armazena os dados do histórico
   } catch (error) {
     console.error('Erro ao carregar dados:', error)
   } finally {
@@ -127,7 +165,7 @@ function editarTransacao(t) {
   form.value = {
     description: t.description,
     amount: t.amount,
-    date: t.transaction_date, // Preenche o form com a data do banco
+    date: t.transaction_date, // Preenche com a data do banco
     category_id: t.category_id,
     is_fixed: t.is_fixed,
     is_paid: t.is_paid,
@@ -142,11 +180,11 @@ async function salvarTransacao() {
   }
 
   try {
-    // CORREÇÃO AQUI: Montamos o payload manualmente para trocar 'date' por 'transaction_date'
+    // MANTIDO: Sua correção do erro 422
     const payload = {
       description: form.value.description,
       amount: parseFloat(form.value.amount),
-      transaction_date: form.value.date, // O Python exige este nome exato
+      transaction_date: form.value.date,
       category_id: form.value.category_id,
       is_fixed: form.value.is_fixed,
       is_paid: form.value.is_paid,
@@ -177,7 +215,7 @@ async function excluirTransacao(id) {
   }
 }
 
-// --- OUTRAS FUNÇÕES ---
+// --- OUTRAS FUNÇÕES (MANTIDAS IGUAIS) ---
 async function criarCategoria() {
   if (!novaCategoria.value.name) return alert('Digite um nome!')
   try {
@@ -251,7 +289,8 @@ async function importarContasFixas() {
 }
 
 const money = (val) => Number(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
-const formatDate = (dateString) => new Date(dateString).toLocaleDateString('pt-BR')
+const formatDate = (dateString) =>
+  new Date(dateString).toLocaleDateString('pt-BR', { timeZone: 'UTC' }) // Ajuste para fuso horário
 
 onMounted(() => buscarDados())
 watch(filtros, () => buscarDados(), { deep: true })
@@ -352,11 +391,20 @@ watch(filtros, () => buscarDados(), { deep: true })
         </div>
       </div>
 
-      <div class="section-charts">
-        <h2>Despesas por Categoria</h2>
-        <div class="chart-box">
-          <Pie v-if="transacoes.length > 0" :data="chartData" :options="chartOptions" />
-          <p v-else class="empty-msg">Sem dados para gráfico.</p>
+      <div class="section-charts-col">
+        <div class="chart-card">
+          <h3>Despesas por Categoria</h3>
+          <div class="chart-box">
+            <Pie v-if="transacoes.length > 0" :data="chartData" :options="chartOptions" />
+            <p v-else class="empty-msg">Sem dados para gráfico.</p>
+          </div>
+        </div>
+
+        <div class="chart-card">
+          <h3>Evolução Anual</h3>
+          <div class="chart-box">
+            <Bar :data="barData" :options="barOptions" />
+          </div>
         </div>
       </div>
     </div>
@@ -471,12 +519,16 @@ watch(filtros, () => buscarDados(), { deep: true })
   padding: 20px;
   max-width: 1400px;
   margin: 0 auto;
+  height: 100vh; /* Ocupa altura total */
+  display: flex;
+  flex-direction: column;
 }
 .top-bar {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
 }
 .subtitle {
   color: #666;
@@ -538,21 +590,27 @@ watch(filtros, () => buscarDados(), { deep: true })
 .kpi-container {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 20px;
-  margin-bottom: 30px;
+  gap: 15px;
+  margin-bottom: 20px;
+  flex-shrink: 0;
 }
 .card {
   background: white;
-  padding: 20px;
-  border-radius: 12px;
-  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  padding: 15px;
+  border-radius: 10px;
+  box-shadow: 0 2px 5px rgba(0, 0, 0, 0.05);
   text-align: center;
 }
+.card h3 {
+  font-size: 11px;
+  text-transform: uppercase;
+  color: #888;
+  margin-bottom: 5px;
+}
 .card .valor {
-  font-size: 24px;
+  font-size: 22px;
   font-weight: 700;
   color: #333;
-  margin-top: 10px;
 }
 .receita .valor {
   color: #2ecc71;
@@ -566,17 +624,25 @@ watch(filtros, () => buscarDados(), { deep: true })
 .pendente .valor {
   color: #f39c12;
 }
+
+/* 6. NOVO LAYOUT DE CONTEÚDO */
 .main-content {
   display: grid;
-  grid-template-columns: 2fr 1fr;
+  grid-template-columns: 2fr 1fr; /* Tabela maior (2/3), Gráficos (1/3) */
   gap: 20px;
+  flex: 1;
+  overflow: hidden; /* Impede scroll duplo */
+  min-height: 0;
 }
-.section-table,
-.section-charts {
+
+.section-table {
   background: white;
   padding: 20px;
-  border-radius: 12px;
+  border-radius: 10px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
 }
 .section-header {
   display: flex;
@@ -585,7 +651,8 @@ watch(filtros, () => buscarDados(), { deep: true })
   margin-bottom: 15px;
 }
 .table-container {
-  overflow-x: auto;
+  overflow-y: auto; /* Scroll apenas na tabela */
+  flex: 1;
 }
 table {
   width: 100%;
@@ -595,14 +662,45 @@ th {
   text-align: left;
   color: #888;
   font-size: 12px;
-  padding: 10px;
+  padding: 8px;
   border-bottom: 1px solid #eee;
+  position: sticky;
+  top: 0;
+  background: white; /* Cabeçalho fixo */
 }
 td {
-  padding: 12px 10px;
+  padding: 10px 8px;
   border-bottom: 1px solid #f9f9f9;
-  font-size: 14px;
+  font-size: 13px;
 }
+
+/* 7. COLUNA DOS GRÁFICOS */
+.section-charts-col {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  overflow-y: auto; /* Scroll se os gráficos não couberem */
+}
+.chart-card {
+  background: white;
+  padding: 15px;
+  border-radius: 10px;
+  flex: 1;
+  min-height: 250px;
+  display: flex;
+  flex-direction: column;
+}
+.chart-card h3 {
+  margin: 0 0 10px 0;
+  font-size: 14px;
+  color: #666;
+}
+.chart-box {
+  flex: 1;
+  position: relative;
+}
+
+/* UI Helpers */
 .status-ok {
   color: #2ecc71;
   font-weight: bold;
@@ -618,12 +716,13 @@ td {
   background: #fef5e7;
   padding: 2px 6px;
   border-radius: 4px;
+  display: block; /* Para ficar em linha nova na célula */
 }
 .badge {
   color: white;
-  padding: 4px 8px;
+  padding: 3px 6px;
   border-radius: 4px;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: bold;
 }
 .text-red {
@@ -638,13 +737,51 @@ td {
   background: #333;
   color: white;
   border: none;
-  padding: 8px 16px;
-  border-radius: 6px;
+  padding: 5px 10px;
+  border-radius: 5px;
   cursor: pointer;
 }
 .btn-add:hover {
   background: #000;
 }
+.btn-icon {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 14px;
+  margin-left: 5px;
+  opacity: 0.6;
+  transition: 0.2s;
+}
+.btn-icon:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+.btn-icon.edit:hover {
+  background-color: #f0f8ff;
+  border-radius: 4px;
+}
+.btn-icon.trash:hover {
+  background-color: #fff0f0;
+  border-radius: 4px;
+}
+.btn-save {
+  background: #2ecc71;
+  color: white;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 5px;
+  font-weight: bold;
+}
+.btn-cancel {
+  background: #f1f1f1;
+  border: none;
+  padding: 8px 15px;
+  border-radius: 5px;
+  cursor: pointer;
+}
+
+/* Modais */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -659,13 +796,13 @@ td {
 }
 .modal-content {
   background: white;
-  padding: 25px;
-  border-radius: 12px;
-  width: 400px;
-  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  padding: 20px;
+  border-radius: 10px;
+  width: 350px; /* Mais compacto */
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
 }
 .modal-content.large-modal {
-  width: 550px;
+  width: 500px;
 }
 .modal-desc {
   font-size: 13px;
@@ -674,7 +811,7 @@ td {
   margin-top: -10px;
 }
 .form-group {
-  margin-bottom: 15px;
+  margin-bottom: 10px;
   display: flex;
   flex-direction: column;
 }
@@ -686,9 +823,9 @@ td {
 }
 .form-group input,
 .form-group select {
-  padding: 10px;
+  padding: 8px;
   border: 1px solid #ddd;
-  border-radius: 6px;
+  border-radius: 5px;
   font-size: 14px;
 }
 .form-row {
@@ -733,7 +870,7 @@ td {
   font-size: 20px;
 }
 .cat-list {
-  max-height: 300px;
+  max-height: 200px;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
@@ -805,25 +942,18 @@ td {
   cursor: pointer;
   font-weight: bold;
 }
-.btn-icon {
-  border: none;
-  background: transparent;
-  cursor: pointer;
-  font-size: 16px;
-  margin-left: 5px;
-  opacity: 0.7;
-  transition: 0.2s;
-}
-.btn-icon:hover {
-  opacity: 1;
-  transform: scale(1.1);
-}
-.btn-icon.edit:hover {
-  background-color: #f0f8ff;
-  border-radius: 4px;
-}
-.btn-icon.trash:hover {
-  background-color: #fff0f0;
-  border-radius: 4px;
+
+/* 8. MANTIDO: CORREÇÃO DE CLIQUES E SELEÇÃO */
+input,
+select,
+textarea,
+button,
+.modal-content,
+.form-group,
+.table-container {
+  /* Adicionado table-container para permitir scroll */
+  -webkit-app-region: no-drag !important;
+  user-select: text !important; /* Permite selecionar o texto */
+  cursor: auto !important;
 }
 </style>

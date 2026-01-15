@@ -88,7 +88,7 @@ def delete_recurring(id: int, db: Session = Depends(get_db)):
     return {"ok": True}
 
 # ==========================================
-# ROTAS DE TRANSAÇÕES (AGORA COM EDITAR/EXCLUIR)
+# ROTAS DE TRANSAÇÕES
 # ==========================================
 
 @app.post("/transactions/", response_model=schemas.TransactionResponse)
@@ -113,7 +113,6 @@ def read_transactions(month: int = None, year: int = None, db: Session = Depends
         query = query.filter(models.Transaction.transaction_date >= start_date, models.Transaction.transaction_date <= end_date)
     return query.all()
 
-# --- NOVO: ROTA DE EDITAR (PUT) ---
 @app.put("/transactions/{transaction_id}", response_model=schemas.TransactionResponse)
 def update_transaction(transaction_id: int, transaction: schemas.TransactionCreate, db: Session = Depends(get_db)):
     db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
@@ -133,7 +132,6 @@ def update_transaction(transaction_id: int, transaction: schemas.TransactionCrea
     db.refresh(db_transaction)
     return db_transaction
 
-# --- NOVO: ROTA DE EXCLUIR (DELETE) ---
 @app.delete("/transactions/{transaction_id}")
 def delete_transaction(transaction_id: int, db: Session = Depends(get_db)):
     db_transaction = db.query(models.Transaction).filter(models.Transaction.id == transaction_id).first()
@@ -211,3 +209,32 @@ def get_dashboard_summary(month: int, year: int, db: Session = Depends(get_db)):
         "saldo": saldo,
         "pendente": pendente
     }
+
+# --- NOVO: HISTÓRICO ANUAL (PARA GRÁFICO DE BARRAS) ---
+@app.get("/dashboard/history")
+def get_dashboard_history(year: int, db: Session = Depends(get_db)):
+    # Retorna uma lista com Receita/Despesa para cada mês do ano (1 a 12)
+    history = []
+    
+    for month in range(1, 13):
+        last_day = calendar.monthrange(year, month)[1]
+        start_date = date(year, month, 1)
+        end_date = date(year, month, last_day)
+        
+        # Função auxiliar interna para somar
+        def get_sum(tipo):
+            val = db.query(func.sum(models.Transaction.amount))\
+                .join(models.Category)\
+                .filter(models.Category.type == tipo)\
+                .filter(models.Transaction.transaction_date >= start_date)\
+                .filter(models.Transaction.transaction_date <= end_date)\
+                .scalar()
+            return float(val) if val else 0.0
+
+        history.append({
+            "month": month,
+            "receita": get_sum("RECEITA"),
+            "despesa": get_sum("DESPESA")
+        })
+
+    return history
