@@ -18,6 +18,9 @@ const showModalTransacao = ref(false)
 const showModalCategorias = ref(false)
 const showModalRecorrencia = ref(false)
 
+// Estado de Edição
+const transacaoEmEdicaoId = ref(null)
+
 // Filtros
 const dataAtual = new Date()
 const filtros = ref({
@@ -38,7 +41,6 @@ const form = ref({
 
 const novaCategoria = ref({ name: '', color_hex: '#333333', type: 'DESPESA' })
 
-// Form CORRIGIDO para estimated_amount
 const novaRecorrencia = ref({
   description: '',
   estimated_amount: '',
@@ -104,22 +106,78 @@ async function buscarDados() {
   }
 }
 
+// --- FUNÇÕES DE TRANSAÇÃO ---
+
+function abrirNovaTransacao() {
+  transacaoEmEdicaoId.value = null
+  form.value = {
+    description: '',
+    amount: '',
+    date: new Date().toISOString().substr(0, 10),
+    category_id: '',
+    is_fixed: false,
+    is_paid: true,
+    payment_method: 'Pix'
+  }
+  showModalTransacao.value = true
+}
+
+function editarTransacao(t) {
+  transacaoEmEdicaoId.value = t.id
+  form.value = {
+    description: t.description,
+    amount: t.amount,
+    date: t.transaction_date, // Preenche o form com a data do banco
+    category_id: t.category_id,
+    is_fixed: t.is_fixed,
+    is_paid: t.is_paid,
+    payment_method: t.payment_method || 'Pix'
+  }
+  showModalTransacao.value = true
+}
+
 async function salvarTransacao() {
   if (!form.value.description || !form.value.amount || !form.value.category_id) {
     return alert('Preencha os campos obrigatórios!')
   }
+
   try {
-    const payload = { ...form.value, amount: parseFloat(form.value.amount) }
-    await api.post('/transactions/', payload)
+    // CORREÇÃO AQUI: Montamos o payload manualmente para trocar 'date' por 'transaction_date'
+    const payload = {
+      description: form.value.description,
+      amount: parseFloat(form.value.amount),
+      transaction_date: form.value.date, // O Python exige este nome exato
+      category_id: form.value.category_id,
+      is_fixed: form.value.is_fixed,
+      is_paid: form.value.is_paid,
+      payment_method: form.value.payment_method
+    }
+
+    if (transacaoEmEdicaoId.value) {
+      await api.put(`/transactions/${transacaoEmEdicaoId.value}`, payload)
+    } else {
+      await api.post('/transactions/', payload)
+    }
+
     showModalTransacao.value = false
     buscarDados()
-    form.value.description = ''
-    form.value.amount = ''
   } catch (error) {
     alert('Erro ao salvar transação.')
+    console.error(error)
   }
 }
 
+async function excluirTransacao(id) {
+  if (!confirm('Tem certeza que deseja excluir este lançamento?')) return
+  try {
+    await api.delete(`/transactions/${id}`)
+    buscarDados()
+  } catch (error) {
+    alert('Erro ao excluir transação.')
+  }
+}
+
+// --- OUTRAS FUNÇÕES ---
 async function criarCategoria() {
   if (!novaCategoria.value.name) return alert('Digite um nome!')
   try {
@@ -153,7 +211,6 @@ async function abrirRecorrencias() {
 }
 
 async function criarRecorrencia() {
-  // Validação atualizada
   if (!novaRecorrencia.value.description || !novaRecorrencia.value.estimated_amount)
     return alert('Preencha dados!')
   try {
@@ -164,7 +221,6 @@ async function criarRecorrencia() {
     novaRecorrencia.value.estimated_amount = ''
   } catch (error) {
     alert('Erro ao criar modelo de conta fixa.')
-    console.error(error)
   }
 }
 
@@ -182,7 +238,6 @@ async function excluirRecorrencia(id) {
 async function importarContasFixas() {
   const mesNome = meses.find((m) => m.v === filtros.value.mes).n
   if (!confirm(`Deseja gerar as contas fixas para ${mesNome}/${filtros.value.ano}?`)) return
-
   try {
     const res = await api.post(
       `/transactions/generate-fixed/${filtros.value.mes}/${filtros.value.ano}`
@@ -251,7 +306,7 @@ watch(filtros, () => buscarDados(), { deep: true })
       <div class="section-table">
         <div class="section-header">
           <h2>Lançamentos</h2>
-          <button class="btn-add" @click="showModalTransacao = true">+ Novo Lançamento</button>
+          <button class="btn-add" @click="abrirNovaTransacao">+ Novo Lançamento</button>
         </div>
         <div class="table-container">
           <table v-if="transacoes.length > 0">
@@ -262,6 +317,7 @@ watch(filtros, () => buscarDados(), { deep: true })
                 <th>Categoria</th>
                 <th>Status</th>
                 <th>Valor</th>
+                <th style="text-align: right">Ações</th>
               </tr>
             </thead>
             <tbody>
@@ -281,6 +337,14 @@ watch(filtros, () => buscarDados(), { deep: true })
                   {{ t.category?.type === 'DESPESA' ? '- ' : '+ ' }}
                   {{ money(t.amount) }}
                 </td>
+                <td style="text-align: right">
+                  <button class="btn-icon edit" @click="editarTransacao(t)" title="Editar">
+                    ✏️
+                  </button>
+                  <button class="btn-icon trash" @click="excluirTransacao(t.id)" title="Excluir">
+                    🗑️
+                  </button>
+                </td>
               </tr>
             </tbody>
           </table>
@@ -297,44 +361,10 @@ watch(filtros, () => buscarDados(), { deep: true })
       </div>
     </div>
 
-    <div v-if="showModalRecorrencia" class="modal-overlay">
-      <div class="modal-content large-modal">
-        <h3>Configurar Contas Fixas</h3>
-        <p class="modal-desc">Cadastre aqui o que você paga todo mês.</p>
-
-        <div class="add-cat-box">
-          <input v-model="novaRecorrencia.description" type="text" placeholder="Ex: Aluguel..." />
-          <input
-            v-model="novaRecorrencia.estimated_amount"
-            type="number"
-            placeholder="Valor Estimado"
-            style="width: 100px"
-          />
-          <select v-model="novaRecorrencia.category_id">
-            <option value="" disabled>Categoria</option>
-            <option v-for="cat in categorias" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
-          </select>
-          <button @click="criarRecorrencia" class="btn-mini-add">+</button>
-        </div>
-
-        <div class="cat-list">
-          <div v-for="item in recorrencias" :key="item.id" class="cat-item">
-            <div class="cat-info">
-              <strong>{{ item.description }}</strong>
-              <span class="badge-value">{{ money(item.estimated_amount) }}</span>
-            </div>
-            <button class="btn-trash" @click="excluirRecorrencia(item.id)">🗑️</button>
-          </div>
-        </div>
-        <div class="modal-actions">
-          <button class="btn-cancel" @click="showModalRecorrencia = false">Fechar</button>
-        </div>
-      </div>
-    </div>
-
     <div v-if="showModalTransacao" class="modal-overlay">
       <div class="modal-content">
-        <h3>Nova Transação</h3>
+        <h3>{{ transacaoEmEdicaoId ? 'Editar Transação' : 'Nova Transação' }}</h3>
+
         <div class="form-group">
           <label>Descrição</label>
           <input v-model="form.description" type="text" placeholder="Ex: Mercado..." />
@@ -399,11 +429,44 @@ watch(filtros, () => buscarDados(), { deep: true })
         </div>
       </div>
     </div>
+
+    <div v-if="showModalRecorrencia" class="modal-overlay">
+      <div class="modal-content large-modal">
+        <h3>Configurar Contas Fixas</h3>
+        <p class="modal-desc">Cadastre aqui o que você paga todo mês.</p>
+        <div class="add-cat-box">
+          <input v-model="novaRecorrencia.description" type="text" placeholder="Ex: Aluguel..." />
+          <input
+            v-model="novaRecorrencia.estimated_amount"
+            type="number"
+            placeholder="Valor Estimado"
+            style="width: 100px"
+          />
+          <select v-model="novaRecorrencia.category_id">
+            <option value="" disabled>Categoria</option>
+            <option v-for="cat in categorias" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+          <button @click="criarRecorrencia" class="btn-mini-add">+</button>
+        </div>
+        <div class="cat-list">
+          <div v-for="item in recorrencias" :key="item.id" class="cat-item">
+            <div class="cat-info">
+              <strong>{{ item.description }}</strong>
+              <span class="badge-value">{{ money(item.estimated_amount) }}</span>
+            </div>
+            <button class="btn-trash" @click="excluirRecorrencia(item.id)">🗑️</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showModalRecorrencia = false">Fechar</button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>
 
 <style scoped>
-/* Copie os estilos do arquivo anterior, eles não mudaram */
+/* Estilos Base */
 .dashboard {
   padding: 20px;
   max-width: 1400px;
@@ -741,5 +804,26 @@ td {
   border-radius: 6px;
   cursor: pointer;
   font-weight: bold;
+}
+.btn-icon {
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  margin-left: 5px;
+  opacity: 0.7;
+  transition: 0.2s;
+}
+.btn-icon:hover {
+  opacity: 1;
+  transform: scale(1.1);
+}
+.btn-icon.edit:hover {
+  background-color: #f0f8ff;
+  border-radius: 4px;
+}
+.btn-icon.trash:hover {
+  background-color: #fff0f0;
+  border-radius: 4px;
 }
 </style>

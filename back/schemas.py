@@ -19,7 +19,7 @@ class CategoryCreate(CategoryBase):
 class CategoryResponse(CategoryBase):
     id: int
     class Config:
-        from_attributes = True # Permite ler dados do SQLAlchemy
+        from_attributes = True 
 
 # Validação para Transações
 class TransactionBase(BaseModel):
@@ -36,32 +36,14 @@ class TransactionCreate(TransactionBase):
 
 class TransactionResponse(TransactionBase):
     id: int
-    category: Optional[CategoryResponse] = None # Retorna a categoria junto
+    category: Optional[CategoryResponse] = None 
     class Config:
         from_attributes = True
-        # ... (Mantenha o código anterior de Category e Transaction)
 
-# --- SCHEMAS PARA RECORRÊNCIA (NOVO) ---
+# --- SCHEMAS PARA RECORRÊNCIA (CORRIGIDO) ---
 class RecurringBase(BaseModel):
     description: str
-    amount: float
-    category_id: int
-    active: bool = True
-
-class RecurringCreate(RecurringBase):
-    pass
-
-class RecurringResponse(RecurringBase):
-    id: int
-    category: Optional[CategoryResponse] = None
-    class Config:
-        from_attributes = True
-        # ... (Mantenha o código anterior de Category e Transaction)
-
-# --- SCHEMAS PARA RECORRÊNCIA ---
-class RecurringBase(BaseModel):
-    description: str
-    estimated_amount: float # <--- MUDAMOS DE 'amount' PARA 'estimated_amount'
+    estimated_amount: float  # <--- Nome correto padronizado
     category_id: int
     active: bool = True
 
