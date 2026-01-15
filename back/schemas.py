@@ -39,3 +39,37 @@ class TransactionResponse(TransactionBase):
     category: Optional[CategoryResponse] = None # Retorna a categoria junto
     class Config:
         from_attributes = True
+        # ... (Mantenha o código anterior de Category e Transaction)
+
+# --- SCHEMAS PARA RECORRÊNCIA (NOVO) ---
+class RecurringBase(BaseModel):
+    description: str
+    amount: float
+    category_id: int
+    active: bool = True
+
+class RecurringCreate(RecurringBase):
+    pass
+
+class RecurringResponse(RecurringBase):
+    id: int
+    category: Optional[CategoryResponse] = None
+    class Config:
+        from_attributes = True
+        # ... (Mantenha o código anterior de Category e Transaction)
+
+# --- SCHEMAS PARA RECORRÊNCIA ---
+class RecurringBase(BaseModel):
+    description: str
+    estimated_amount: float # <--- MUDAMOS DE 'amount' PARA 'estimated_amount'
+    category_id: int
+    active: bool = True
+
+class RecurringCreate(RecurringBase):
+    pass
+
+class RecurringResponse(RecurringBase):
+    id: int
+    category: Optional[CategoryResponse] = None
+    class Config:
+        from_attributes = True

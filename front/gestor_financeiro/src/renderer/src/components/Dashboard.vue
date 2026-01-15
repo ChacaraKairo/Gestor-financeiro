@@ -7,14 +7,16 @@ import { Pie } from 'vue-chartjs'
 ChartJS.register(ArcElement, Tooltip, Legend)
 
 // --- ESTADOS ---
-const resumo = ref({ receita: 0, despesa: 0, saldo: 0 })
+const resumo = ref({ receita: 0, despesa: 0, saldo: 0, pendente: 0 })
 const transacoes = ref([])
 const categorias = ref([])
+const recorrencias = ref([])
 const carregando = ref(false)
 
 // Modais
 const showModalTransacao = ref(false)
-const showModalCategorias = ref(false) // Novo Modal
+const showModalCategorias = ref(false)
+const showModalRecorrencia = ref(false)
 
 // Filtros
 const dataAtual = new Date()
@@ -23,7 +25,7 @@ const filtros = ref({
   ano: dataAtual.getFullYear()
 })
 
-// Formulário de Transação
+// Forms
 const form = ref({
   description: '',
   amount: '',
@@ -34,11 +36,14 @@ const form = ref({
   payment_method: 'Pix'
 })
 
-// Formulário de Nova Categoria
-const novaCategoria = ref({
-  name: '',
-  color_hex: '#333333',
-  type: 'DESPESA'
+const novaCategoria = ref({ name: '', color_hex: '#333333', type: 'DESPESA' })
+
+// Form CORRIGIDO para estimated_amount
+const novaRecorrencia = ref({
+  description: '',
+  estimated_amount: '',
+  category_id: '',
+  active: true
 })
 
 const meses = [
@@ -76,7 +81,6 @@ const chartData = computed(() => {
     datasets: [{ backgroundColor: cores, data: Object.values(agrupado) }]
   }
 })
-
 const chartOptions = { responsive: true, maintainAspectRatio: false }
 
 // --- FUNÇÕES ---
@@ -100,11 +104,9 @@ async function buscarDados() {
   }
 }
 
-// Salvar Transação
 async function salvarTransacao() {
   if (!form.value.description || !form.value.amount || !form.value.category_id) {
-    alert('Preencha os campos obrigatórios!')
-    return
+    return alert('Preencha os campos obrigatórios!')
   }
   try {
     const payload = { ...form.value, amount: parseFloat(form.value.amount) }
@@ -112,30 +114,25 @@ async function salvarTransacao() {
     showModalTransacao.value = false
     buscarDados()
     form.value.description = ''
-    form.value.amount = '' // Limpar
+    form.value.amount = ''
   } catch (error) {
     alert('Erro ao salvar transação.')
   }
 }
 
-// --- FUNÇÕES DE CATEGORIA (NOVO) ---
 async function criarCategoria() {
   if (!novaCategoria.value.name) return alert('Digite um nome!')
   try {
     await api.post('/categories/', novaCategoria.value)
-    // Recarrega categorias
     const res = await api.get('/categories/')
     categorias.value = res.data
-    // Limpa form
     novaCategoria.value.name = ''
-    novaCategoria.value.color_hex = '#333333'
   } catch (error) {
     alert('Erro ao criar categoria')
   }
 }
-
 async function excluirCategoria(id) {
-  if (!confirm('Tem certeza? Transações desta categoria ficarão sem categoria.')) return
+  if (!confirm('Tem certeza?')) return
   try {
     await api.delete(`/categories/${id}`)
     const res = await api.get('/categories/')
@@ -145,7 +142,59 @@ async function excluirCategoria(id) {
   }
 }
 
-// Formatadores
+async function abrirRecorrencias() {
+  try {
+    const res = await api.get('/recurring/')
+    recorrencias.value = res.data
+    showModalRecorrencia.value = true
+  } catch (error) {
+    alert('Erro ao buscar contas fixas.')
+  }
+}
+
+async function criarRecorrencia() {
+  // Validação atualizada
+  if (!novaRecorrencia.value.description || !novaRecorrencia.value.estimated_amount)
+    return alert('Preencha dados!')
+  try {
+    await api.post('/recurring/', novaRecorrencia.value)
+    const res = await api.get('/recurring/')
+    recorrencias.value = res.data
+    novaRecorrencia.value.description = ''
+    novaRecorrencia.value.estimated_amount = ''
+  } catch (error) {
+    alert('Erro ao criar modelo de conta fixa.')
+    console.error(error)
+  }
+}
+
+async function excluirRecorrencia(id) {
+  if (!confirm('Parar de gerar esta conta automaticamente?')) return
+  try {
+    await api.delete(`/recurring/${id}`)
+    const res = await api.get('/recurring/')
+    recorrencias.value = res.data
+  } catch (error) {
+    alert('Erro ao excluir.')
+  }
+}
+
+async function importarContasFixas() {
+  const mesNome = meses.find((m) => m.v === filtros.value.mes).n
+  if (!confirm(`Deseja gerar as contas fixas para ${mesNome}/${filtros.value.ano}?`)) return
+
+  try {
+    const res = await api.post(
+      `/transactions/generate-fixed/${filtros.value.mes}/${filtros.value.ano}`
+    )
+    alert(res.data.message)
+    buscarDados()
+  } catch (error) {
+    console.error(error)
+    alert('Erro ao gerar contas fixas.')
+  }
+}
+
 const money = (val) => Number(val).toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' })
 const formatDate = (dateString) => new Date(dateString).toLocaleDateString('pt-BR')
 
@@ -162,13 +211,19 @@ watch(filtros, () => buscarDados(), { deep: true })
       </div>
       <div class="filtros">
         <button class="btn-config" @click="showModalCategorias = true" title="Gerenciar Categorias">
-          ⚙️ Categorias
+          ⚙️ Cats
         </button>
-
+        <button class="btn-config" @click="abrirRecorrencias" title="Configurar Contas Fixas">
+          📅 Fixas
+        </button>
+        <div class="separator"></div>
         <select v-model="filtros.mes">
           <option v-for="m in meses" :key="m.v" :value="m.v">{{ m.n }}</option>
         </select>
         <input type="number" v-model="filtros.ano" class="ano-input" />
+        <button class="btn-import" @click="importarContasFixas" title="Gerar contas deste mês">
+          📥 Importar Fixas
+        </button>
         <button class="btn-refresh" @click="buscarDados">🔄</button>
       </div>
     </header>
@@ -186,6 +241,10 @@ watch(filtros, () => buscarDados(), { deep: true })
         <h3>Saldo</h3>
         <p class="valor">{{ money(resumo.saldo) }}</p>
       </div>
+      <div class="card pendente">
+        <h3>A Pagar (Pendente)</h3>
+        <p class="valor">{{ money(resumo.pendente) }}</p>
+      </div>
     </div>
 
     <div class="main-content">
@@ -194,7 +253,6 @@ watch(filtros, () => buscarDados(), { deep: true })
           <h2>Lançamentos</h2>
           <button class="btn-add" @click="showModalTransacao = true">+ Novo Lançamento</button>
         </div>
-
         <div class="table-container">
           <table v-if="transacoes.length > 0">
             <thead>
@@ -202,6 +260,7 @@ watch(filtros, () => buscarDados(), { deep: true })
                 <th>Data</th>
                 <th>Descrição</th>
                 <th>Categoria</th>
+                <th>Status</th>
                 <th>Valor</th>
               </tr>
             </thead>
@@ -210,9 +269,13 @@ watch(filtros, () => buscarDados(), { deep: true })
                 <td>{{ formatDate(t.transaction_date) }}</td>
                 <td>{{ t.description }}</td>
                 <td>
-                  <span class="badge" :style="{ backgroundColor: t.category?.color_hex }">
-                    {{ t.category?.name }}
-                  </span>
+                  <span class="badge" :style="{ backgroundColor: t.category?.color_hex }">{{
+                    t.category?.name
+                  }}</span>
+                </td>
+                <td>
+                  <span v-if="t.is_paid" class="status-ok">Pago</span>
+                  <span v-else class="status-pending">Pendente</span>
                 </td>
                 <td :class="t.category?.type === 'DESPESA' ? 'text-red' : 'text-green'">
                   {{ t.category?.type === 'DESPESA' ? '- ' : '+ ' }}
@@ -230,6 +293,41 @@ watch(filtros, () => buscarDados(), { deep: true })
         <div class="chart-box">
           <Pie v-if="transacoes.length > 0" :data="chartData" :options="chartOptions" />
           <p v-else class="empty-msg">Sem dados para gráfico.</p>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="showModalRecorrencia" class="modal-overlay">
+      <div class="modal-content large-modal">
+        <h3>Configurar Contas Fixas</h3>
+        <p class="modal-desc">Cadastre aqui o que você paga todo mês.</p>
+
+        <div class="add-cat-box">
+          <input v-model="novaRecorrencia.description" type="text" placeholder="Ex: Aluguel..." />
+          <input
+            v-model="novaRecorrencia.estimated_amount"
+            type="number"
+            placeholder="Valor Estimado"
+            style="width: 100px"
+          />
+          <select v-model="novaRecorrencia.category_id">
+            <option value="" disabled>Categoria</option>
+            <option v-for="cat in categorias" :key="cat.id" :value="cat.id">{{ cat.name }}</option>
+          </select>
+          <button @click="criarRecorrencia" class="btn-mini-add">+</button>
+        </div>
+
+        <div class="cat-list">
+          <div v-for="item in recorrencias" :key="item.id" class="cat-item">
+            <div class="cat-info">
+              <strong>{{ item.description }}</strong>
+              <span class="badge-value">{{ money(item.estimated_amount) }}</span>
+            </div>
+            <button class="btn-trash" @click="excluirRecorrencia(item.id)">🗑️</button>
+          </div>
+        </div>
+        <div class="modal-actions">
+          <button class="btn-cancel" @click="showModalRecorrencia = false">Fechar</button>
         </div>
       </div>
     </div>
@@ -278,28 +376,24 @@ watch(filtros, () => buscarDados(), { deep: true })
     <div v-if="showModalCategorias" class="modal-overlay">
       <div class="modal-content large-modal">
         <h3>Gerenciar Categorias</h3>
-
         <div class="add-cat-box">
-          <input v-model="novaCategoria.name" type="text" placeholder="Nome da Categoria" />
+          <input v-model="novaCategoria.name" type="text" placeholder="Nome" />
           <select v-model="novaCategoria.type">
             <option value="DESPESA">Despesa</option>
             <option value="RECEITA">Receita</option>
           </select>
-          <input type="color" v-model="novaCategoria.color_hex" title="Escolha a cor" />
+          <input type="color" v-model="novaCategoria.color_hex" />
           <button @click="criarCategoria" class="btn-mini-add">+</button>
         </div>
-
         <div class="cat-list">
           <div v-for="cat in categorias" :key="cat.id" class="cat-item">
             <div class="cat-info">
               <span class="color-dot" :style="{ background: cat.color_hex }"></span>
               <strong>{{ cat.name }}</strong>
-              <small>({{ cat.type }})</small>
             </div>
             <button class="btn-trash" @click="excluirCategoria(cat.id)">🗑️</button>
           </div>
         </div>
-
         <div class="modal-actions">
           <button class="btn-cancel" @click="showModalCategorias = false">Fechar</button>
         </div>
@@ -309,7 +403,7 @@ watch(filtros, () => buscarDados(), { deep: true })
 </template>
 
 <style scoped>
-/* Mantendo estilos anteriores e adicionando novos */
+/* Copie os estilos do arquivo anterior, eles não mudaram */
 .dashboard {
   padding: 20px;
   max-width: 1400px;
@@ -326,12 +420,50 @@ watch(filtros, () => buscarDados(), { deep: true })
   margin: 0;
   font-size: 14px;
 }
+.filtros {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
 .filtros select,
 .filtros input {
   padding: 8px;
   border: 1px solid #ddd;
   border-radius: 6px;
-  margin-left: 10px;
+}
+.separator {
+  width: 1px;
+  height: 30px;
+  background: #ddd;
+  margin: 0 10px;
+}
+.btn-config {
+  padding: 8px 12px;
+  background: #fff;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 600;
+  color: #555;
+  transition: 0.2s;
+}
+.btn-config:hover {
+  background: #f5f5f5;
+  color: #333;
+}
+.btn-import {
+  padding: 8px 12px;
+  background: #3498db;
+  color: white;
+  border: none;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: bold;
+  font-size: 13px;
+}
+.btn-import:hover {
+  background: #2980b9;
 }
 .btn-refresh {
   padding: 8px;
@@ -340,22 +472,9 @@ watch(filtros, () => buscarDados(), { deep: true })
   cursor: pointer;
   font-size: 1.2rem;
 }
-.btn-config {
-  padding: 8px 15px;
-  background: #eee;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  cursor: pointer;
-  margin-right: 10px;
-  font-size: 14px;
-}
-.btn-config:hover {
-  background: #e0e0e0;
-}
-
 .kpi-container {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   gap: 20px;
   margin-bottom: 30px;
 }
@@ -367,9 +486,10 @@ watch(filtros, () => buscarDados(), { deep: true })
   text-align: center;
 }
 .card .valor {
-  font-size: 28px;
+  font-size: 24px;
   font-weight: 700;
   color: #333;
+  margin-top: 10px;
 }
 .receita .valor {
   color: #2ecc71;
@@ -380,7 +500,9 @@ watch(filtros, () => buscarDados(), { deep: true })
 .saldo.negativo .valor {
   color: #e74c3c;
 }
-
+.pendente .valor {
+  color: #f39c12;
+}
 .main-content {
   display: grid;
   grid-template-columns: 2fr 1fr;
@@ -399,17 +521,6 @@ watch(filtros, () => buscarDados(), { deep: true })
   align-items: center;
   margin-bottom: 15px;
 }
-.chart-box {
-  height: 250px;
-  position: relative;
-}
-.empty-msg {
-  color: #999;
-  text-align: center;
-  padding: 20px;
-  font-style: italic;
-}
-
 .table-container {
   overflow-x: auto;
 }
@@ -429,13 +540,21 @@ td {
   border-bottom: 1px solid #f9f9f9;
   font-size: 14px;
 }
-.text-red {
-  color: #e74c3c;
-  font-weight: 500;
-}
-.text-green {
+.status-ok {
   color: #2ecc71;
-  font-weight: 500;
+  font-weight: bold;
+  font-size: 11px;
+  background: #eafaf1;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.status-pending {
+  color: #e67e22;
+  font-weight: bold;
+  font-size: 11px;
+  background: #fef5e7;
+  padding: 2px 6px;
+  border-radius: 4px;
 }
 .badge {
   color: white;
@@ -444,7 +563,14 @@ td {
   font-size: 11px;
   font-weight: bold;
 }
-
+.text-red {
+  color: #e74c3c;
+  font-weight: 500;
+}
+.text-green {
+  color: #2ecc71;
+  font-weight: 500;
+}
 .btn-add {
   background: #333;
   color: white;
@@ -452,14 +578,10 @@ td {
   padding: 8px 16px;
   border-radius: 6px;
   cursor: pointer;
-  transition: 0.2s;
 }
 .btn-add:hover {
   background: #000;
-  transform: translateY(-1px);
 }
-
-/* MODAL & FORMS */
 .modal-overlay {
   position: fixed;
   top: 0;
@@ -480,9 +602,14 @@ td {
   box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
 }
 .modal-content.large-modal {
-  width: 500px;
-} /* Modal maior para categorias */
-
+  width: 550px;
+}
+.modal-desc {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 20px;
+  margin-top: -10px;
+}
 .form-group {
   margin-bottom: 15px;
   display: flex;
@@ -519,7 +646,80 @@ td {
   gap: 5px;
   cursor: pointer;
 }
-
+.add-cat-box {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 20px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #eee;
+}
+.add-cat-box input,
+.add-cat-box select {
+  padding: 8px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  flex: 1;
+}
+.btn-mini-add {
+  background: #2ecc71;
+  color: white;
+  border: none;
+  width: 40px;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 20px;
+}
+.cat-list {
+  max-height: 300px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.cat-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 10px;
+  background: #f9f9f9;
+  border-radius: 6px;
+}
+.cat-info {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.color-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  display: inline-block;
+}
+.badge-value {
+  font-size: 12px;
+  color: #555;
+  background: #e0e0e0;
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+.btn-trash {
+  background: none;
+  border: none;
+  cursor: pointer;
+  opacity: 0.5;
+  transition: 0.2s;
+}
+.btn-trash:hover {
+  opacity: 1;
+  transform: scale(1.1);
+  color: red;
+}
+.empty-msg-small {
+  text-align: center;
+  color: #999;
+  font-size: 13px;
+  margin-top: 10px;
+}
 .modal-actions {
   display: flex;
   justify-content: flex-end;
@@ -541,84 +741,5 @@ td {
   border-radius: 6px;
   cursor: pointer;
   font-weight: bold;
-}
-
-/* ESTILOS ESPECÍFICOS PARA CATEGORIAS */
-.add-cat-box {
-  display: flex;
-  gap: 10px;
-  margin-bottom: 20px;
-  padding-bottom: 20px;
-  border-bottom: 1px solid #eee;
-}
-.add-cat-box input[type='text'] {
-  flex: 2;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-.add-cat-box select {
-  flex: 1;
-  padding: 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-}
-.add-cat-box input[type='color'] {
-  width: 40px;
-  height: 38px;
-  border: none;
-  padding: 0;
-  background: none;
-  cursor: pointer;
-}
-.btn-mini-add {
-  background: #2ecc71;
-  color: white;
-  border: none;
-  width: 40px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 20px;
-}
-
-.cat-list {
-  max-height: 300px;
-  overflow-y: auto;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.cat-item {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 10px;
-  background: #f9f9f9;
-  border-radius: 6px;
-}
-.cat-info {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-}
-.cat-info small {
-  color: #999;
-}
-.color-dot {
-  width: 12px;
-  height: 12px;
-  border-radius: 50%;
-  display: inline-block;
-}
-.btn-trash {
-  background: none;
-  border: none;
-  cursor: pointer;
-  opacity: 0.5;
-  transition: 0.2s;
-}
-.btn-trash:hover {
-  opacity: 1;
-  transform: scale(1.1);
 }
 </style>

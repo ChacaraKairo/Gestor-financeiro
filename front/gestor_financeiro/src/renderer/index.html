@@ -13,3 +13,14 @@
     <script type="module" src="/src/main.js"></script>
   </body>
 </html>
+<input
+  v-model="novaRecorrencia.estimated_amount"
+  type="number"
+  placeholder="Valor Estimado"
+  style="width: 100px"
+/>
+
+<div class="cat-info">
+  <strong>{{ item.description }}</strong>
+  <span class="badge-value">{{ money(item.estimated_amount) }}</span>
+</div>
